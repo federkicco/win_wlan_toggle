@@ -69,8 +69,9 @@ public sealed class PersistenceTests : IDisposable
     [Fact]
     public void Config_validation_rejects_unsafe_values()
     {
-        var bad = new WlanToggleConfig { Periodic = new PeriodicOptions { Interval = TimeSpan.FromSeconds(10), Down = TimeSpan.FromSeconds(10) } };
+        var bad = new WlanToggleConfig { PeriodicEnabled = true, ReconnectAfter = TimeSpan.FromSeconds(10), Periodic = new PeriodicOptions { Interval = TimeSpan.FromSeconds(10) } };
         Assert.Throws<ArgumentException>(bad.Validate);
+        Assert.Throws<ArgumentException>(new WlanToggleConfig { ReconnectAfter = TimeSpan.FromHours(2) }.Validate);
         Assert.Throws<ArgumentException>(new WlanToggleConfig { AdapterName = " " }.Validate);
     }
 }

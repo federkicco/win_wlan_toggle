@@ -32,17 +32,27 @@ public sealed class OutageManager
     private readonly TimeProvider _time;
     private readonly OutageOptions _opt;
     private readonly IOutageLogSink _log;
+    private readonly IOutageGuard _guard;
     private readonly object _gate = new();
     private Active? _active;
 
     public OutageManager(IWlanController controller, IJournalStore journal, TimeProvider time,
-        OutageOptions? options = null, IOutageLogSink? log = null)
+        OutageOptions? options = null, IOutageLogSink? log = null, IOutageGuard? guard = null)
     {
         _controller = controller;
         _journal = journal;
         _time = time;
         _opt = options ?? new OutageOptions();
         _log = log ?? new NullOutageLogSink();
+        _guard = guard ?? new NullOutageGuard();
+    }
+
+    /// <summary>Raised (on an arbitrary thread) when an outage starts, is extended or ends.</summary>
+    public event Action? Changed;
+
+    private void RaiseChanged()
+    {
+        try { Changed?.Invoke(); } catch { /* UI handlers must never break the safety path */ }
     }
 
     public OutageOptions Options => _opt;
@@ -64,7 +74,9 @@ public sealed class OutageManager
             throw new ArgumentOutOfRangeException(nameof(down), down,
                 $"Down time must be > 0 and <= MaxDown ({_opt.MaxDown}).");
 
-        Active a;
+        Active? a = null;
+        var extended = false;
+        DateTimeOffset? extendedTo = null;
         lock (_gate)
         {
             if (_active is { } running)
@@ -73,24 +85,33 @@ public sealed class OutageManager
                     return new OutageOutcome(OutageResult.RejectedBusy, null);
 
                 var now = _time.GetUtcNow();
-                var wanted = now + down;
                 var cap = running.DownAt + _opt.MaxDown;
-                var newDeadline = Max(running.Deadline, wanted);
+                var newDeadline = Max(running.Deadline, now + down);
                 if (newDeadline > cap) newDeadline = cap;
                 if (newDeadline > running.Deadline)
                 {
                     running.Deadline = newDeadline;
                     _journal.Save(new PendingOutage(_controller.AdapterName, running.DownAt, newDeadline, running.Source));
                     running.WakeWaiter();
+                    extendedTo = newDeadline;
                 }
-                return new OutageOutcome(OutageResult.Extended, null);
+                extended = true;
             }
-
-            var start = _time.GetUtcNow();
-            a = _active = new Active(start, start + down, source, requested: down);
+            else
+            {
+                var start = _time.GetUtcNow();
+                a = _active = new Active(start, start + down, source, requested: down);
+            }
         }
 
-        return await ExecuteAsync(a, disable: true, ct).ConfigureAwait(false);
+        if (extended)
+        {
+            if (extendedTo is { } to) await TryArmAsync(to).ConfigureAwait(false);
+            RaiseChanged();
+            return new OutageOutcome(OutageResult.Extended, null);
+        }
+
+        return await ExecuteAsync(a!, disable: true, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -144,16 +165,25 @@ public sealed class OutageManager
         var record = new OutageRecord("restore", _controller.AdapterName, started, r.UpAtUtc, TimeSpan.Zero,
             TimeSpan.Zero, r.TimeToUp, r.Attempts, r.Recovered, r.Error);
         _log.Write(record);
+        if (r.Recovered)
+        {
+            // Last: if this runs inside the backstop task itself, nothing important is left to do after it.
+            try { await _guard.DisarmAsync().ConfigureAwait(false); } catch { }
+        }
         return new OutageOutcome(r.Recovered ? OutageResult.Completed : OutageResult.Failed, record);
     }
 
     private async Task<OutageOutcome> ExecuteAsync(Active a, bool disable, CancellationToken ct)
     {
         Exception? error = null;
+        string? guardNote = null;
         try
         {
             // Journal first: if we die right after this, recovery knows when to re-enable.
             _journal.Save(new PendingOutage(_controller.AdapterName, a.DownAt, a.Deadline, a.Source));
+            // Independent backstop (e.g. a SYSTEM scheduled task) that restores the link even if this process dies.
+            guardNote = await TryArmAsync(a.Deadline).ConfigureAwait(false);
+            RaiseChanged();
             if (disable) await _controller.DisableAsync(ct).ConfigureAwait(false);
             await WaitUntilDeadlineAsync(a, ct).ConfigureAwait(false);
         }
@@ -164,12 +194,19 @@ public sealed class OutageManager
 
         // From here on nothing the caller does may interrupt us.
         var r = await ReenableVerifiedAsync().ConfigureAwait(false);
-        if (r.Recovered) _journal.Clear();
+        if (r.Recovered)
+        {
+            _journal.Clear();
+            try { await _guard.DisarmAsync().ConfigureAwait(false); } catch { /* a stale backstop only re-checks the link */ }
+        }
 
         var upAt = r.UpAtUtc;
-        var errText = r.Recovered ? (error is OperationCanceledException ? null : error?.Message) : (r.Error ?? error?.Message ?? "link did not recover");
+        var errors = new List<string>();
+        if (!r.Recovered) errors.Add(r.Error ?? error?.Message ?? "link did not recover");
+        else if (error is not null and not OperationCanceledException) errors.Add(error.Message);
+        if (guardNote is not null) errors.Add(guardNote);
         var record = new OutageRecord(a.Source, _controller.AdapterName, a.DownAt, upAt, a.Requested,
-            upAt - a.DownAt, r.TimeToUp, r.Attempts, r.Recovered, errText);
+            upAt - a.DownAt, r.TimeToUp, r.Attempts, r.Recovered, errors.Count == 0 ? null : string.Join("; ", errors));
         _log.Write(record);
 
         var ok = r.Recovered && (error is null || error is OperationCanceledException);
@@ -177,9 +214,24 @@ public sealed class OutageManager
 
         lock (_gate) _active = null;
         a.Done.TrySetResult(outcome);
+        RaiseChanged();
 
         if (error is OperationCanceledException) ExceptionDispatchInfo.Capture(error).Throw();
         return outcome;
+    }
+
+    /// <summary>Arms the backstop; a failure is reported in the log but never blocks the outage. Returns a note on failure.</summary>
+    private async Task<string?> TryArmAsync(DateTimeOffset latestReenableUtc)
+    {
+        try
+        {
+            await _guard.ArmAsync(latestReenableUtc, _controller.AdapterName).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return "backstop not armed: " + ex.Message;
+        }
     }
 
     private async Task WaitUntilDeadlineAsync(Active a, CancellationToken ct)

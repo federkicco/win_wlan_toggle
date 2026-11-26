@@ -93,3 +93,21 @@ public static class Drive
         }
     }
 }
+
+public sealed class FakeGuard : IOutageGuard
+{
+    public List<DateTimeOffset> Armed { get; } = [];
+    public int Disarmed;
+    public Exception? ArmThrows;
+    public Action? OnArm;
+
+    public Task ArmAsync(DateTimeOffset latestReenableUtc, string adapterName)
+    {
+        OnArm?.Invoke();
+        if (ArmThrows is { } ex) throw ex;
+        Armed.Add(latestReenableUtc);
+        return Task.CompletedTask;
+    }
+
+    public Task DisarmAsync() { Disarmed++; return Task.CompletedTask; }
+}

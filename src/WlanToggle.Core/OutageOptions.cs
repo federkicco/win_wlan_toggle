@@ -11,7 +11,7 @@ public enum OverlapPolicy
 public sealed record OutageOptions
 {
     /// <summary>Hard upper bound on how long the link may be down for one outage (safety net).</summary>
-    public TimeSpan MaxDown { get; init; } = TimeSpan.FromSeconds(120);
+    public TimeSpan MaxDown { get; init; } = TimeSpan.FromMinutes(15);
 
     public OverlapPolicy Overlap { get; init; } = OverlapPolicy.Ignore;
 

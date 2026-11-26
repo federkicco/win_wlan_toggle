@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{E68AD942
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WlanToggle.Core.Tests", "tests\WlanToggle.Core.Tests\WlanToggle.Core.Tests.csproj", "{1FDFA851-15BA-4FC3-A2D8-A3E4B95914E5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WlanToggle.Windows", "src\WlanToggle.Windows\WlanToggle.Windows.csproj", "{49BF4ED6-0596-4239-8B05-8AE266CB8EA9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -28,9 +30,14 @@ Global
 		{1FDFA851-15BA-4FC3-A2D8-A3E4B95914E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1FDFA851-15BA-4FC3-A2D8-A3E4B95914E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1FDFA851-15BA-4FC3-A2D8-A3E4B95914E5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{49BF4ED6-0596-4239-8B05-8AE266CB8EA9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{49BF4ED6-0596-4239-8B05-8AE266CB8EA9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{49BF4ED6-0596-4239-8B05-8AE266CB8EA9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{49BF4ED6-0596-4239-8B05-8AE266CB8EA9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{89803763-CC54-425B-928D-A96DACE82097} = {7744E0BF-B504-4274-B8D6-56B8F6238778}
 		{1FDFA851-15BA-4FC3-A2D8-A3E4B95914E5} = {E68AD942-A9ED-45F4-B364-7798D9A820DB}
+		{49BF4ED6-0596-4239-8B05-8AE266CB8EA9} = {7744E0BF-B504-4274-B8D6-56B8F6238778}
 	EndGlobalSection
 EndGlobal

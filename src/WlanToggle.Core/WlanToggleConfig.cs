@@ -18,10 +18,19 @@ public sealed record WlanToggleConfig
     public string AdapterName { get; init; } = "Wi-Fi";
     public DisconnectMethod Method { get; init; } = DisconnectMethod.Adapter;
     public OutageOptions Outage { get; init; } = new();
-    public PeriodicOptions Periodic { get; init; } = new();
 
-    /// <summary>Resume the periodic schedule automatically when the service starts.</summary>
-    public bool ResumePeriodicOnStart { get; init; }
+    /// <summary>How long the link stays down before it is brought back ("reconnect interval").</summary>
+    public TimeSpan ReconnectAfter { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Run the periodic schedule (also resumed when the app starts).</summary>
+    public bool PeriodicEnabled { get; init; }
+
+    /// <summary>Periodic schedule. Its <c>Down</c> is ignored: <see cref="ReconnectAfter"/> is used instead.</summary>
+    public PeriodicOptions Periodic { get; init; } = new() { Interval = TimeSpan.FromMinutes(5) };
+
+    /// <summary>The periodic options actually used (down time taken from <see cref="ReconnectAfter"/>).</summary>
+    [JsonIgnore]
+    public PeriodicOptions EffectivePeriodic => Periodic with { Down = ReconnectAfter };
 
     public string? LogPath { get; init; }
     public string? JournalPath { get; init; }
@@ -53,6 +62,9 @@ public sealed record WlanToggleConfig
         if (string.IsNullOrWhiteSpace(AdapterName)) throw new ArgumentException("AdapterName is required.");
         if (Outage.MaxDown <= TimeSpan.Zero) throw new ArgumentException("Outage.MaxDown must be > 0.");
         if (Outage.EnableAttempts < 1) throw new ArgumentException("Outage.EnableAttempts must be >= 1.");
-        Periodic.Validate(Outage.MaxDown);
+        if (ReconnectAfter <= TimeSpan.Zero || ReconnectAfter > Outage.MaxDown)
+            throw new ArgumentException($"ReconnectAfter must be > 0 and <= Outage.MaxDown ({Outage.MaxDown}).");
+        // Only an active schedule has to be consistent; this lets the user pick values in any order.
+        if (PeriodicEnabled) EffectivePeriodic.Validate(Outage.MaxDown);
     }
 }

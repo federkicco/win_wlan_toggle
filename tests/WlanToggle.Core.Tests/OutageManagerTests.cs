@@ -12,7 +12,9 @@ public class OutageManagerTests
 
     public OutageManagerTests() => _wlan = new FakeWlan(_time, _journal);
 
-    private OutageManager Create(OutageOptions? o = null) => new(_wlan, _journal, _time, o ?? Fast(), _log);
+    private readonly FakeGuard _guard = new();
+
+    private OutageManager Create(OutageOptions? o = null) => new(_wlan, _journal, _time, o ?? Fast(), _log, _guard);
 
     private static OutageOptions Fast() => new()
     {
@@ -115,7 +117,7 @@ public class OutageManagerTests
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
-    [InlineData(121)]
+    [InlineData(901)]
     public async Task Down_time_outside_the_safety_cap_is_rejected(int seconds)
     {
         var m = Create();
@@ -188,7 +190,7 @@ public class OutageManagerTests
         _wlan.State = AdapterState.Down;
         var now = _time.GetUtcNow();
         _journal.Save(new PendingOutage("Wi-Fi", now, now + TimeSpan.FromDays(3), "manual"));
-        var m = Create();
+        var m = Create(Fast() with { MaxDown = TimeSpan.FromMinutes(2) });
 
         await Drive.RunAsync(m.RecoverAsync(), _time);
         Assert.Equal(AdapterState.Up, _wlan.State);
@@ -230,5 +232,60 @@ public class OutageManagerTests
         Assert.Equal(OutageResult.Completed, r.Result);
         Assert.Equal(AdapterState.Up, _wlan.State);
         Assert.Null(_journal.Load());
+        Assert.Equal(1, _guard.Disarmed); // this is what the SYSTEM backstop task relies on to clean itself up
+    }
+
+    [Fact]
+    public async Task Backstop_is_armed_before_disable_and_disarmed_after_recovery()
+    {
+        var m = Create();
+        var t0 = _time.GetUtcNow();
+        _guard.OnArm = () => Assert.Equal(AdapterState.Up, _wlan.State); // still up when armed
+        await Drive.RunAsync(m.RunOutageAsync(TimeSpan.FromSeconds(10), "manual"), _time);
+
+        Assert.Equal(t0 + TimeSpan.FromSeconds(10), Assert.Single(_guard.Armed));
+        Assert.Equal(1, _guard.Disarmed);
+    }
+
+    [Fact]
+    public async Task Backstop_stays_armed_when_the_link_cannot_be_recovered()
+    {
+        _wlan.NeverUp = true;
+        var m = Create(Fast() with { EnableAttempts = 1 });
+        await Drive.RunAsync(m.RunOutageAsync(TimeSpan.FromSeconds(1), "manual"), _time);
+        Assert.Equal(0, _guard.Disarmed);
+    }
+
+    [Fact]
+    public async Task Backstop_is_rearmed_on_extension()
+    {
+        var m = Create(Fast() with { Overlap = OverlapPolicy.Extend });
+        var first = m.RunOutageAsync(TimeSpan.FromSeconds(10), "manual");
+        await Drive.AdvanceAsync(_time, TimeSpan.FromSeconds(5));
+        await m.RunOutageAsync(TimeSpan.FromSeconds(10), "manual");
+        await Drive.RunAsync(first, _time);
+        Assert.Equal(2, _guard.Armed.Count);
+        Assert.True(_guard.Armed[1] > _guard.Armed[0]);
+    }
+
+    [Fact]
+    public async Task Failing_to_arm_the_backstop_does_not_block_the_outage_but_is_logged()
+    {
+        _guard.ArmThrows = new InvalidOperationException("no powershell");
+        var m = Create();
+        var outcome = await Drive.RunAsync(m.RunOutageAsync(TimeSpan.FromSeconds(2), "manual"), _time);
+        Assert.Equal(OutageResult.Completed, outcome.Result);
+        Assert.Contains("no powershell", outcome.Record!.Error);
+        Assert.Equal(1, _wlan.DisableCalls);
+    }
+
+    [Fact]
+    public async Task Changed_event_fires_when_an_outage_starts_and_ends()
+    {
+        var m = Create();
+        var events = 0;
+        m.Changed += () => Interlocked.Increment(ref events);
+        await Drive.RunAsync(m.RunOutageAsync(TimeSpan.FromSeconds(2), "manual"), _time);
+        Assert.True(events >= 2);
     }
 }

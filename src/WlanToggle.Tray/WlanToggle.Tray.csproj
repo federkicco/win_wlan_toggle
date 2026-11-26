@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>WlanToggle</AssemblyName>
+    <RootNamespace>WlanToggle.Tray</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WlanToggle.Core\WlanToggle.Core.csproj" />
+    <ProjectReference Include="..\WlanToggle.Windows\WlanToggle.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
