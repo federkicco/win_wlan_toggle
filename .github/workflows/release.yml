@@ -1,13 +1,23 @@
 name: Release
 
-# Publish a GitHub Release with the Windows exe whenever a version tag is pushed:
-#   git tag v0.1.0 && git push origin v0.1.0
+# Publish the Windows exe as a GitHub Release asset.
+#  * push a tag:        git tag v0.1.0 && git push origin v0.1.0
+#  * or run manually:   Actions -> Release -> Run workflow, entering a tag name. Builds the selected branch and
+#                       attaches the files to that tag's release (creating the release/tag if it doesn't exist yet).
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0-rc1)"
+        required: true
 
 permissions:
   contents: write   # create the release and upload assets
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -24,10 +34,10 @@ jobs:
       - name: Publish single-file exe
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
+          $version = ($env:TAG.TrimStart('v')) -replace '-.*$',''
           dotnet publish src/WlanToggle.Tray -c Release -r win-x64 --self-contained `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:Version=$($version -replace '-.*$','') -o artifacts/WlanToggle
+            -p:Version=$version -o artifacts/WlanToggle
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package
@@ -37,13 +47,21 @@ jobs:
           $hash = (Get-FileHash WlanToggle-win-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  WlanToggle-win-x64.zip" | Out-File -Encoding ascii WlanToggle-win-x64.zip.sha256
 
-      - name: Create release
+      - name: Create or update release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ghArgs = @("release", "create", "${{ github.ref_name }}",
-                    "WlanToggle-win-x64.zip", "WlanToggle-win-x64.zip.sha256",
-                    "--title", "WlanToggle ${{ github.ref_name }}", "--generate-notes")
-          if ("${{ github.ref_name }}" -like "*-*") { $ghArgs += "--prerelease" }
-          gh @args
+          $files = @("WlanToggle-win-x64.zip", "WlanToggle-win-x64.zip.sha256")
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # Release already exists (e.g. created in the web UI): just attach / replace the files.
+            gh release upload $env:TAG @files --clobber
+          } else {
+            $ghArgs = @("release", "create", $env:TAG) + $files +
+                      @("--title", "WlanToggle $env:TAG", "--generate-notes", "--target", "${{ github.sha }}")
+            if ($env:TAG -like "*-*") { $ghArgs += "--prerelease" }
+            gh @ghArgs
+          }
+          if ($LASTEXITCODE -ne 0) { throw "gh release failed with exit code $LASTEXITCODE" }
+          gh release view $env:TAG --json assets --jq '.assets[].name'
