@@ -19,6 +19,8 @@ the notification area:
 
 - **Left click** — disconnect Wi-Fi now and reconnect after the configured time.
 - **Right click** — settings menu:
+  - *Adapter*: which Wi-Fi adapter to toggle (listed live; saved in `config.json` as `AdapterName`). On first run
+    the connected Wi-Fi adapter is picked and saved; the status line and tooltip show `[adapter name]`.
   - *Disconnect mode*: **Adapter disable** (netsh), **Disassociate** (Native Wifi disconnect/connect, adapter
     stays enabled), **Radio off** (WinRT Radios API).
   - *Reconnect after*: 5 s, **10 s (default)**, 30 s, 1 min, 5 min, 10 min.

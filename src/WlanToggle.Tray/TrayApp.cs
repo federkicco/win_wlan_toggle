@@ -19,6 +19,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private readonly ToolStripMenuItem _statusItem = new() { Enabled = false };
     private readonly ToolStripMenuItem _periodicItem = new("Enable periodic disconnect") { CheckOnClick = false };
+    private readonly ToolStripMenuItem _adapterMenu = new("Adapter");
     private readonly List<(ToolStripMenuItem Item, DisconnectMethod Value)> _methodItems = [];
     private readonly List<(ToolStripMenuItem Item, TimeSpan Value)> _reconnectItems = [];
     private readonly List<(ToolStripMenuItem Item, TimeSpan Value)> _intervalItems = [];
@@ -29,10 +30,17 @@ internal sealed class TrayApp : ApplicationContext
         Directory.CreateDirectory(StatePaths.Directory);
 
         var config = LoadConfig(out var configProblem);
-        var adapterName = config.AdapterName;
+        // Pin the adapter explicitly: if the configured name does not exist, adopt the connected Wi-Fi adapter and save it.
+        var nic = WifiControllers.FindAdapter(config.AdapterName);
+        if (!string.Equals(nic.Name, config.AdapterName, StringComparison.OrdinalIgnoreCase))
+        {
+            configProblem = $"Adapter '{config.AdapterName}' not found; using '{nic.Name}'. Change it via the Adapter menu.";
+            config = config with { AdapterName = nic.Name };
+            try { config.Save(StatePaths.Config); } catch { }
+        }
         _engine = new WlanToggleEngine(
             config,
-            method => WifiControllers.Create(method, adapterName),
+            WifiControllers.Create,
             new FileJournalStore(StatePaths.Journal),
             TimeProvider.System,
             new CsvOutageLogSink(StatePaths.OutageLog),
@@ -56,7 +64,7 @@ internal sealed class TrayApp : ApplicationContext
         Refresh();
 
         if (configProblem is not null) Notify(configProblem, ToolTipIcon.Warning);
-        _ = StartAsync(adapterName);
+        _ = StartAsync();
     }
 
     private static WlanToggleConfig LoadConfig(out string? problem)
@@ -75,7 +83,7 @@ internal sealed class TrayApp : ApplicationContext
         }
     }
 
-    private async Task StartAsync(string adapterName)
+    private async Task StartAsync()
     {
         try
         {
@@ -91,6 +99,9 @@ internal sealed class TrayApp : ApplicationContext
     {
         var menu = new ContextMenuStrip();
         menu.Opening += (_, _) => Refresh();
+
+        // The adapter list is rebuilt each time the menu opens (adapters come and go).
+        menu.Opening += (_, _) => RebuildAdapterMenu();
 
         var mode = new ToolStripMenuItem("Disconnect mode");
         foreach (var m in MenuChoices.Methods)
@@ -134,10 +145,33 @@ internal sealed class TrayApp : ApplicationContext
         menu.Items.AddRange(new ToolStripItem[]
         {
             _statusItem, new ToolStripSeparator(),
-            mode, reconnect, _periodicItem, interval, new ToolStripSeparator(),
+            _adapterMenu, mode, reconnect, _periodicItem, interval, new ToolStripSeparator(),
             restore, openFolder, exit,
         });
         return menu;
+    }
+
+    private void RebuildAdapterMenu()
+    {
+        _adapterMenu.DropDownItems.Clear();
+        var current = _engine.Status.AdapterName;
+        IReadOnlyList<WifiControllers.AdapterInfo> adapters;
+        try { adapters = WifiControllers.ListWirelessAdapters(); }
+        catch { adapters = []; }
+
+        foreach (var a in adapters)
+        {
+            var item = new ToolStripMenuItem($"{a.Name}  -  {a.Description}" + (a.IsUp ? "  (connected)" : ""))
+            {
+                Checked = string.Equals(a.Name, current, StringComparison.OrdinalIgnoreCase),
+                Enabled = !_engine.Status.Disconnected,
+            };
+            var name = a.Name;
+            item.Click += (_, _) => Apply(_engine.SetAdapterAsync(name));
+            _adapterMenu.DropDownItems.Add(item);
+        }
+        if (adapters.Count == 0)
+            _adapterMenu.DropDownItems.Add(new ToolStripMenuItem("(no Wi-Fi adapters found)") { Enabled = false });
     }
 
     private void Refresh()
@@ -156,6 +190,7 @@ internal sealed class TrayApp : ApplicationContext
             text = $"Connected. Next periodic disconnect in {Format(Math.Max(0, (int)(next - now).TotalSeconds))}";
         else
             text = "Connected";
+        text = $"[{st.AdapterName}] {text}";
         if (st.LastError is not null) text += " (last error: " + st.LastError + ")";
 
         _statusItem.Text = text.Length > 120 ? text[..117] + "..." : text;
@@ -198,7 +233,7 @@ internal sealed class TrayApp : ApplicationContext
                     Notify("Already disconnected; it will reconnect on its own (use \"Reconnect now\" to end it early).", ToolTipIcon.Info);
                     break;
                 case OutageResult.Failed:
-                    Notify("Wi-Fi did not come back: " + outcome.Record?.Error, ToolTipIcon.Error);
+                    Notify($"Toggle failed on adapter '{_engine.Status.AdapterName}': " + outcome.Record?.Error, ToolTipIcon.Error);
                     break;
             }
         }

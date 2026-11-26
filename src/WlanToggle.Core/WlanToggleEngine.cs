@@ -11,7 +11,8 @@ public sealed record EngineStatus(
     DateTimeOffset? ReconnectAtUtc,
     bool PeriodicEnabled,
     DateTimeOffset? NextPeriodicUtc,
-    string? LastError);
+    string? LastError,
+    string AdapterName);
 
 /// <summary>
 /// Everything the UI needs: current settings, on-demand toggle, periodic schedule, and the safety hooks.
@@ -19,7 +20,7 @@ public sealed record EngineStatus(
 /// </summary>
 public sealed class WlanToggleEngine
 {
-    private readonly Func<DisconnectMethod, IWlanController> _controllerFactory;
+    private readonly Func<WlanToggleConfig, IWlanController> _controllerFactory;
     private readonly IJournalStore _journal;
     private readonly TimeProvider _time;
     private readonly IOutageLogSink _log;
@@ -36,7 +37,7 @@ public sealed class WlanToggleEngine
     private Task? _periodicTask;
     private string? _lastError;
 
-    public WlanToggleEngine(WlanToggleConfig config, Func<DisconnectMethod, IWlanController> controllerFactory,
+    public WlanToggleEngine(WlanToggleConfig config, Func<WlanToggleConfig, IWlanController> controllerFactory,
         IJournalStore journal, TimeProvider time, IOutageLogSink? log = null, IOutageGuard? guard = null,
         Action<WlanToggleConfig>? persist = null, Func<double>? random = null)
     {
@@ -63,7 +64,7 @@ public sealed class WlanToggleEngine
         {
             var cur = _manager.Current;
             return new EngineStatus(cur is not null, cur?.ReenableAtUtc, _config.PeriodicEnabled,
-                _config.PeriodicEnabled ? _scheduler?.NextRunUtc : null, _lastError);
+                _config.PeriodicEnabled ? _scheduler?.NextRunUtc : null, _lastError, _manager.AdapterName);
         }
     }
 
@@ -99,6 +100,9 @@ public sealed class WlanToggleEngine
 
     public Task<SetResult> SetMethodAsync(DisconnectMethod method) => ChangeAsync(
         c => c with { Method = method }, rebuildManager: method != _config.Method, restartPeriodic: true);
+
+    public Task<SetResult> SetAdapterAsync(string adapterName) => ChangeAsync(
+        c => c with { AdapterName = adapterName }, rebuildManager: adapterName != _config.AdapterName, restartPeriodic: true);
 
     public Task<SetResult> SetReconnectAfterAsync(TimeSpan value) => ChangeAsync(
         c => c with { ReconnectAfter = value }, rebuildManager: false, restartPeriodic: true);
@@ -138,7 +142,7 @@ public sealed class WlanToggleEngine
             if (candidate == _config) return SetResult.Success;
 
             if (rebuildManager && _manager.Current is not null)
-                return SetResult.Fail("Cannot change the disconnect mode while the link is down.");
+                return SetResult.Fail("Cannot change the disconnect mode or adapter while the link is down.");
 
             await StopPeriodicAsync().ConfigureAwait(false);
             lock (_sync)
@@ -163,7 +167,7 @@ public sealed class WlanToggleEngine
 
     private OutageManager CreateManager(WlanToggleConfig cfg)
     {
-        var m = new OutageManager(_controllerFactory(cfg.Method), _journal, _time, cfg.Outage, _log, _guard);
+        var m = new OutageManager(_controllerFactory(cfg), _journal, _time, cfg.Outage, _log, _guard);
         m.Changed += RaiseChanged;
         return m;
     }

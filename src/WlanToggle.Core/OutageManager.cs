@@ -57,6 +57,9 @@ public sealed class OutageManager
 
     public OutageOptions Options => _opt;
 
+    /// <summary>Name of the adapter this manager toggles.</summary>
+    public string AdapterName => _controller.AdapterName;
+
     /// <summary>The outage currently in progress, if any.</summary>
     public OutageSnapshot? Current
     {

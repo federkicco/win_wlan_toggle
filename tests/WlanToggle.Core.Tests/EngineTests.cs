@@ -17,7 +17,7 @@ public class EngineTests
 
     private WlanToggleEngine Create(WlanToggleConfig? cfg = null) => new(
         cfg ?? Cfg(),
-        m => { _built.Add(m); return _wlan; },
+        c => { _built.Add(c.Method); return _wlan; },
         _journal, _time, _log, _guard, persist: _saved.Add, random: () => 0.5);
 
     private static WlanToggleConfig Cfg() => new()
@@ -209,5 +209,18 @@ public class EngineTests
         e.Changed += () => Interlocked.Increment(ref n);
         await e.SetReconnectAfterAsync(TimeSpan.FromSeconds(5));
         Assert.True(n >= 1);
+    }
+
+    [Fact]
+    public async Task Changing_the_adapter_rebuilds_the_controller_with_the_new_name_and_is_saved()
+    {
+        var names = new List<string>();
+        var e = new WlanToggleEngine(Cfg(), c => { names.Add(c.AdapterName); return _wlan; },
+            _journal, _time, _log, _guard, persist: _saved.Add);
+        Assert.True((await e.SetAdapterAsync("WLAN3")).Ok);
+        Assert.Equal(["Wi-Fi", "WLAN3"], names);
+        Assert.Equal("WLAN3", _saved.Last().AdapterName);
+        Assert.False((await e.SetAdapterAsync(" ")).Ok);
+        Assert.Equal("Wi-Fi", e.Status.AdapterName); // the fake controller's name
     }
 }

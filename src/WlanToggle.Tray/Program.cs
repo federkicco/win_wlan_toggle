@@ -47,7 +47,7 @@ internal static class Program
             Directory.CreateDirectory(StatePaths.Directory);
             var cfg = WlanToggleConfig.Load(StatePaths.Config);
             var manager = new OutageManager(
-                WifiControllers.Create(cfg.Method, cfg.AdapterName),
+                WifiControllers.Create(cfg),
                 new FileJournalStore(StatePaths.Journal), TimeProvider.System, cfg.Outage,
                 new CsvOutageLogSink(StatePaths.OutageLog),
                 new ScheduledTaskGuard(Environment.ProcessPath!));
