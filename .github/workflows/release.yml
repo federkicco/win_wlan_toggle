@@ -42,8 +42,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $args = @("release", "create", "${{ github.ref_name }}",
+          $ghArgs = @("release", "create", "${{ github.ref_name }}",
                     "WlanToggle-win-x64.zip", "WlanToggle-win-x64.zip.sha256",
                     "--title", "WlanToggle ${{ github.ref_name }}", "--generate-notes")
-          if ("${{ github.ref_name }}" -like "*-*") { $args += "--prerelease" }
+          if ("${{ github.ref_name }}" -like "*-*") { $ghArgs += "--prerelease" }
           gh @args
