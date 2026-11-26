@@ -5,6 +5,13 @@ Small Windows 11 utility to take the Wi-Fi link down for a short, bounded time a
 tests that need controlled WLAN disconnections, including when driven over an RDP session
 that itself depends on that Wi-Fi link.
 
+## Getting the exe
+
+Download `WlanToggle-win-x64.zip` from the repository's **Releases** page (no login needed), unzip, run.
+To publish a new release: `git tag v0.1.0 && git push origin v0.1.0` — the `Release` workflow tests, builds the
+single-file exe and attaches it (plus a `.sha256`) to a GitHub Release. Tags containing a `-` (e.g. `v0.1.0-rc1`)
+are marked as pre-releases. Every push also uploads the exe as a CI artifact (login required to download).
+
 ## Using it
 
 Run `WlanToggle.exe` (it asks for administrator rights: disabling an adapter needs them). An icon appears in
@@ -39,7 +46,8 @@ link was back up, attempts) live in `%ProgramData%\WlanToggle`.
 | 1. Core library (state machine, scheduler, engine, journal, config, CSV log) + tests | done |
 | 2. Windows controllers: adapter / disassociate / radio, scheduled-task backstop | written, **needs testing on real hardware** |
 | 3. Tray app (WinForms) | written, compiles; **needs testing on real hardware** |
-| 4. Installer / auto-start at logon, release workflow | todo |
+| 4. Release workflow (tag → GitHub Release with exe) | done |
+| 5. Auto-start at logon, resume-from-sleep handling | todo |
 
 ## Design in one paragraph
 
